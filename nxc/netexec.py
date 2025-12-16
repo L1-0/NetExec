@@ -24,6 +24,7 @@ from os.path import join as path_join
 from sys import exit
 from rich.progress import Progress
 import platform
+
 if sys.stdout.encoding == "cp1252":
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -46,9 +47,14 @@ async def start_run(protocol_obj, args, db, targets):  # noqa: RUF029
     if args.no_progress or len(targets) == 1:
         with ThreadPoolExecutor(max_workers=args.threads) as executor:
             nxc_logger.debug(f"Creating thread for {protocol_obj}")
-            futures = [executor.submit(protocol_obj, args, db, target) for target in targets]
+            futures = [
+                executor.submit(protocol_obj, args, db, target) for target in targets
+            ]
     else:
-        with Progress(console=nxc_console) as progress, ThreadPoolExecutor(max_workers=args.threads) as executor:
+        with (
+            Progress(console=nxc_console) as progress,
+            ThreadPoolExecutor(max_workers=args.threads) as executor,
+        ):
             current = 0
             total = len(targets)
             tasks = progress.add_task(
@@ -56,7 +62,9 @@ async def start_run(protocol_obj, args, db, targets):  # noqa: RUF029
                 total=total,
             )
             nxc_logger.debug(f"Creating thread for {protocol_obj}")
-            futures = [executor.submit(protocol_obj, args, db, target) for target in targets]
+            futures = [
+                executor.submit(protocol_obj, args, db, target) for target in targets
+            ]
             for _ in as_completed(futures):
                 current += 1  # noqa: SIM113
                 progress.update(tasks, completed=current)
@@ -64,7 +72,9 @@ async def start_run(protocol_obj, args, db, targets):  # noqa: RUF029
         try:
             future.result()
         except Exception:
-            nxc_logger.exception(f"Exception for target {targets[futures.index(future)]}: {future.exception()}")
+            nxc_logger.exception(
+                f"Exception for target {targets[futures.index(future)]}: {future.exception()}"
+            )
 
 
 def main():
@@ -84,12 +94,21 @@ def main():
     nxc_logger.debug(f"RUNNING ON: {platform.system()} Release: {platform.release()}")
     nxc_logger.debug(f"Passed args: {args}")
 
+    # Handle dashboard mode - launch TUI
+    if args.protocol == "dashboard":
+        from nxc.dashboard.app import run_dashboard
+
+        run_dashboard(args)
+        exit(0)
+
     # FROM HERE ON A PROTOCOL IS REQUIRED
     if not args.protocol:
         exit(1)
 
     if args.protocol == "ssh" and args.key_file and not args.password:
-        nxc_logger.fail("Password is required, even if a key file is used - if no passphrase for key, use `-p ''`")
+        nxc_logger.fail(
+            "Password is required, even if a key file is used - if no passphrase for key, use `-p ''`"
+        )
         exit(1)
 
     if args.use_kcache and not os.environ.get("KRB5CCNAME"):
@@ -104,7 +123,7 @@ def main():
                 start_id, end_id = cred_id.split("-")
                 try:
                     for n in range(int(start_id), int(end_id) + 1):
-                        args.cred_id.append(n)    # noqa: B909
+                        args.cred_id.append(n)  # noqa: B909
                     args.cred_id.remove(cred_id)  # noqa: B909
                 except Exception as e:
                     nxc_logger.error(f"Error parsing database credential id: {e}")
@@ -146,7 +165,9 @@ def main():
     nxc_logger.debug(f"Protocol DB Path: {protocol_db_path}")
 
     protocol_object = getattr(p_loader.load_protocol(protocol_path), args.protocol)
-    nxc_logger.debug(f"Protocol Object: {protocol_object}, type: {type(protocol_object)}")
+    nxc_logger.debug(
+        f"Protocol Object: {protocol_object}, type: {type(protocol_object)}"
+    )
     protocol_db_object = p_loader.load_protocol(protocol_db_path).database
     nxc_logger.debug(f"Protocol DB Object: {protocol_db_object}")
 
@@ -165,8 +186,17 @@ def main():
         modules = loader.list_modules()
 
     if args.list_modules is not None:
-        low_privilege_modules = {m: props for m, props in modules.items() if args.protocol in props["supported_protocols"] and not props["requires_admin"]}
-        high_privilege_modules = {m: props for m, props in modules.items() if args.protocol in props["supported_protocols"] and props["requires_admin"]}
+        low_privilege_modules = {
+            m: props
+            for m, props in modules.items()
+            if args.protocol in props["supported_protocols"]
+            and not props["requires_admin"]
+        }
+        high_privilege_modules = {
+            m: props
+            for m, props in modules.items()
+            if args.protocol in props["supported_protocols"] and props["requires_admin"]
+        }
 
         # List low privilege modules
         nxc_logger.highlight("LOW PRIVILEGE MODULES")
@@ -178,21 +208,27 @@ def main():
         exit(0)
     elif args.module and args.show_module_options:
         for module in args.module:
-            nxc_logger.display(f"{module} module options:\n{modules[module]['options']}")
+            nxc_logger.display(
+                f"{module} module options:\n{modules[module]['options']}"
+            )
         exit(0)
     elif args.show_module_options:
         nxc_logger.error("--options requires -M/--module")
         exit(1)
     elif args.module:
         # Check the modules for sanity before loading the protocol
-        nxc_logger.debug(f"Modules to be Loaded for sanity check: {args.module}, {type(args.module)}")
+        nxc_logger.debug(
+            f"Modules to be Loaded for sanity check: {args.module}, {type(args.module)}"
+        )
         proto_module_paths = []
         for m in args.module:
             if m not in modules:
                 nxc_logger.error(f"Module not found: {m}")
                 exit(1)
 
-            nxc_logger.debug(f"Loading module for sanity check {m} at path {modules[m]['path']}")
+            nxc_logger.debug(
+                f"Loading module for sanity check {m} at path {modules[m]['path']}"
+            )
             module = loader.init_module(modules[m]["path"])
 
             # Add modules paths to the protocol object so it can load them itself
@@ -200,12 +236,21 @@ def main():
         protocol_object.module_paths = proto_module_paths
 
     if args.protocol == "rdp" and args.execute:
-        ans = input(highlight("[!] Executing remote command via RDP will disconnect the Windows session (not log off) if the targeted user is connected via RDP, do you want to continue ? [Y/n] ", "red"))
+        ans = input(
+            highlight(
+                "[!] Executing remote command via RDP will disconnect the Windows session (not log off) if the targeted user is connected via RDP, do you want to continue ? [Y/n] ",
+                "red",
+            )
+        )
         if ans.lower() not in ["y", "yes", ""]:
             exit(1)
 
     if args.jitter and len(targets) > 1:
-        nxc_logger.highlight(highlight("[!] Jitter is only throttling authentications per target!", "red"))
+        nxc_logger.highlight(
+            highlight(
+                "[!] Jitter is only throttling authentications per target!", "red"
+            )
+        )
 
     try:
         asyncio.run(start_run(protocol_object, args, db, targets))
